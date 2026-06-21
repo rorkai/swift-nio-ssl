@@ -30,19 +30,23 @@ import Musl
 import Glibc
 #elseif canImport(Android)
 import Android
+#elseif canImport(WASILibc)
+import WASILibc
 #else
 #error("unsupported os")
 #endif
 
-#if os(Android)
+#if os(Android) || os(WASI)
 internal typealias FILEPointer = OpaquePointer
 #else
 internal typealias FILEPointer = UnsafeMutablePointer<FILE>
 #endif
 
 private let sysFopen = fopen
+#if !os(WASI)
 private let sysMlock = mlock
 private let sysMunlock = munlock
+#endif
 private let sysFclose = fclose
 private let sysStat = { @Sendable in stat($0, $1) }
 private let sysLstat = lstat
@@ -143,16 +147,24 @@ internal enum Posix {
     @inline(never)
     @discardableResult
     internal static func mlock(addr: UnsafeRawPointer, len: size_t) throws -> CInt {
+        #if os(WASI)
+        0
+        #else
         try wrapSyscall {
             sysMlock(addr, len)
         }
+        #endif
     }
 
     @inline(never)
     @discardableResult
     internal static func munlock(addr: UnsafeRawPointer, len: size_t) throws -> CInt {
+        #if os(WASI)
+        0
+        #else
         try wrapSyscall {
             sysMunlock(addr, len)
         }
+        #endif
     }
 }

@@ -99,7 +99,6 @@ let package = Package(
             dependencies: [
                 "CNIOBoringSSL",
                 "CNIOBoringSSLShims",
-                .product(name: "NIO", package: "swift-nio"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "NIOTLS", package: "swift-nio"),

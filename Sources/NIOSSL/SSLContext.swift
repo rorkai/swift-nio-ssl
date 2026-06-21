@@ -24,6 +24,8 @@ import Musl
 import Glibc
 #elseif canImport(Android)
 import Android
+#elseif canImport(WASILibc)
+import WASILibc
 #else
 #error("unsupported os")
 #endif
@@ -911,6 +913,17 @@ extension Optional where Wrapped == String {
     }
 }
 
+#if os(WASI)
+internal final class DirectoryContents: Sequence, IteratorProtocol {
+    typealias Element = String
+
+    init(path: String) {}
+
+    func next() -> String? {
+        nil
+    }
+}
+#else
 internal class DirectoryContents: Sequence, IteratorProtocol {
 
     typealias Element = String
@@ -945,6 +958,7 @@ internal class DirectoryContents: Sequence, IteratorProtocol {
         closedir(dir)
     }
 }
+#endif
 
 // Used as part of the `_isRehashFormat` format to determine if the filename is a hexadecimal filename.
 extension UTF8.CodeUnit {
