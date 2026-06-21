@@ -24,6 +24,8 @@ import Musl
 import Glibc
 #elseif canImport(Bionic)
 import Bionic
+#elseif canImport(WASILibc)
+import WASILibc
 #else
 #error("unsupported os")
 #endif
@@ -32,6 +34,8 @@ import Bionic
 import struct Darwin.time_t
 #elseif canImport(Glibc)
 import struct Glibc.time_t
+#elseif canImport(WASILibc)
+import struct WASILibc.time_t
 #endif
 
 /// A reference to a BoringSSL Certificate object (`X509 *`).
