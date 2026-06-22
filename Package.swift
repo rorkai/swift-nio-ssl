@@ -56,7 +56,7 @@ let includePrivacyManifest = false
 let strictConcurrencyDevelopment = false
 
 // Preserve NIOSSL's existing dependency on the aggregate NIO product.
-let nioProductPlatforms: [Platform] = [.macOS, .iOS, .tvOS, .watchOS, .linux, .android]
+let nioCompatibilityPlatforms: [Platform] = [.macOS, .iOS, .tvOS, .watchOS, .linux, .android]
 
 let strictConcurrencySettings: [SwiftSetting] = {
     var initialSettings: [SwiftSetting] = []
@@ -117,7 +117,7 @@ let package = Package(
             dependencies: [
                 "CNIOBoringSSL",
                 "CNIOBoringSSLShims",
-                .product(name: "NIO", package: "swift-nio", condition: .when(platforms: nioProductPlatforms)),
+                .product(name: "NIO", package: "swift-nio", condition: .when(platforms: nioCompatibilityPlatforms)),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "NIOTLS", package: "swift-nio"),
