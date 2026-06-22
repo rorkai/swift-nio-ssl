@@ -34,7 +34,7 @@ func generateDependencies() -> [Package.Dependency] {
         return [
             .package(
                 url: "https://github.com/rorkai/swift-nio.git",
-                revision: "692ddd9317df4c956bd5259f973038541f374c18"
+                revision: "f672081a1c88a33ef8535bab78740249325e1d3b"
             )
         ]
     } else {
