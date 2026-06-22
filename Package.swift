@@ -34,7 +34,7 @@ func generateDependencies() -> [Package.Dependency] {
         return [
             .package(
                 url: "https://github.com/rorkai/swift-nio.git",
-                revision: "f672081a1c88a33ef8535bab78740249325e1d3b"
+                revision: "9ff77fc9c314c30886d8186c21efb1b83be1593a"
             )
         ]
     } else {
@@ -55,9 +55,8 @@ let includePrivacyManifest = false
 
 let strictConcurrencyDevelopment = false
 
-// These platforms require a dependency on `NIO` from `NIOSSL` to maintain backward
-// compatibility with previous NIOSSL versions.
-let historicalNIODependencyRequired: [Platform] = [.macOS, .iOS, .tvOS, .watchOS, .linux, .android]
+// Preserve NIOSSL's existing dependency on the aggregate NIO product.
+let nioProductPlatforms: [Platform] = [.macOS, .iOS, .tvOS, .watchOS, .linux, .android]
 
 let strictConcurrencySettings: [SwiftSetting] = {
     var initialSettings: [SwiftSetting] = []
@@ -118,13 +117,7 @@ let package = Package(
             dependencies: [
                 "CNIOBoringSSL",
                 "CNIOBoringSSLShims",
-                .product(
-                    name: "NIO",
-                    package: "swift-nio",
-                    condition: .when(
-                        platforms: historicalNIODependencyRequired
-                    )
-                ),
+                .product(name: "NIO", package: "swift-nio", condition: .when(platforms: nioProductPlatforms)),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "NIOTLS", package: "swift-nio"),
