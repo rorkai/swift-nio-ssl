@@ -934,7 +934,12 @@ extension Optional where Wrapped == String {
 internal final class DirectoryContents: Sequence, IteratorProtocol {
     typealias Element = String
 
-    init(path: String) {}
+    init(path _: String) throws {
+        throw IOError(
+            errnoCode: ENOTSUP,
+            reason: "Directory trust roots are unsupported on WASI."
+        )
+    }
 
     func next() -> String? {
         nil

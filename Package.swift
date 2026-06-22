@@ -32,7 +32,10 @@ import PackageDescription
 func generateDependencies() -> [Package.Dependency] {
     if Context.environment["SWIFTCI_USE_LOCAL_DEPS"] == nil {
         return [
-            .package(url: "https://github.com/apple/swift-nio.git", from: "2.98.0")
+            .package(
+                url: "https://github.com/rorkai/swift-nio.git",
+                revision: "e2bafeaa861f944ce5eb00103937c5a0a9528fc1"
+            )
         ]
     } else {
         return [
@@ -111,6 +114,7 @@ let package = Package(
             dependencies: [
                 "CNIOBoringSSL",
                 "CNIOBoringSSLShims",
+                .product(name: "NIO", package: "swift-nio"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "NIOTLS", package: "swift-nio"),
