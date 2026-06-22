@@ -55,10 +55,9 @@ let includePrivacyManifest = false
 
 let strictConcurrencyDevelopment = false
 
-// These platforms require a dependency on `NIO` from `NIOSSL` to maintain
-// backward compatibility with previous NIOSSL versions.
-let historicalNIODependencyRequired: [Platform] =
-    [.macOS, .iOS, .tvOS, .watchOS, .linux, .android]
+// These platforms require a dependency on `NIO` from `NIOSSL` to maintain backward
+// compatibility with previous NIOSSL versions.
+let historicalNIODependencyRequired: [Platform] = [.macOS, .iOS, .tvOS, .watchOS, .linux, .android]
 
 let strictConcurrencySettings: [SwiftSetting] = {
     var initialSettings: [SwiftSetting] = []
