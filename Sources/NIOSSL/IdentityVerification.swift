@@ -25,6 +25,9 @@ import Glibc
 import Android
 #elseif canImport(WASILibc)
 import WASILibc
+#elseif os(Windows)
+import ucrt
+import WinSDK
 #else
 #error("unsupported os")
 #endif

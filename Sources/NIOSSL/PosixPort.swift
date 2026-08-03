@@ -32,6 +32,9 @@ import Glibc
 import Android
 #elseif canImport(WASILibc)
 import WASILibc
+#elseif os(Windows)
+import ucrt
+import WinSDK
 #else
 #error("unsupported os")
 #endif
@@ -42,15 +45,52 @@ internal typealias FILEPointer = OpaquePointer
 internal typealias FILEPointer = UnsafeMutablePointer<FILE>
 #endif
 
+#if os(Windows)
+// fopen is marked deprecated on Windows. fopen_s is the supported spelling and
+// reports failure through errno.
+private let sysFopen: @Sendable (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> FILEPointer? = { path, mode in
+    var file: FILEPointer? = nil
+    _ = fopen_s(&file, path, mode)
+    return file
+}
+#else
 private let sysFopen = fopen
-#if !os(WASI)
-private let sysMlock = mlock
-private let sysMunlock = munlock
 #endif
 private let sysFclose = fclose
 private let sysStat = { @Sendable in stat($0, $1) }
+#if !os(WASI) && !os(Windows)
+private let sysMlock = mlock
+private let sysMunlock = munlock
+#endif
+#if !os(Windows)
 private let sysLstat = lstat
 private let sysReadlink = readlink
+#endif
+
+// On Windows errno is a function-like macro and therefore invisible to Swift.
+// The underlying function exposes the same value.
+private var currentErrno: CInt {
+    #if os(Windows)
+    _errno().pointee
+    #else
+    errno
+    #endif
+}
+
+private func errnoDescription(_ err: CInt) -> String {
+    #if os(Windows)
+    // strerror is marked deprecated on Windows. strerror_s is the supported
+    // spelling.
+    withUnsafeTemporaryAllocation(of: CChar.self, capacity: 95) { buffer in
+        guard strerror_s(buffer.baseAddress, buffer.count, err) == 0 else {
+            return "Unknown error: \(err)"
+        }
+        return String(cString: buffer.baseAddress!)
+    }
+    #else
+    String(cString: strerror(err)!)
+    #endif
+}
 
 // MARK:- Copied code from SwiftNIO
 private func isUnacceptableErrno(_ code: CInt) -> Bool {
@@ -69,11 +109,11 @@ internal func wrapSyscall<T: FixedWidthInteger>(where function: String = #functi
     while true {
         let res = try body()
         if res == -1 {
-            let err = errno
+            let err = currentErrno
             if err == EINTR {
                 continue
             }
-            assert(!isUnacceptableErrno(err), "unacceptable errno \(err) \(strerror(err)!)")
+            assert(!isUnacceptableErrno(err), "unacceptable errno \(err) \(errnoDescription(err))")
             throw IOError(errnoCode: err, reason: function)
         }
         return res
@@ -88,11 +128,11 @@ internal func wrapErrorIsNullReturnCall<T>(
 ) throws -> T {
     while true {
         guard let res = try body() else {
-            let err = errno
+            let err = currentErrno
             if err == EINTR {
                 continue
             }
-            assert(!isUnacceptableErrno(err), "unacceptable errno \(err) \(strerror(err)!)")
+            assert(!isUnacceptableErrno(err), "unacceptable errno \(err) \(errnoDescription(err))")
             throw IOError(errnoCode: err, reason: errorReason())
         }
         return res
@@ -118,6 +158,15 @@ internal enum Posix {
     }
 
     @inline(never)
+    @discardableResult
+    internal static func stat(path: UnsafePointer<CChar>, buf: UnsafeMutablePointer<stat>) throws -> CInt {
+        try wrapSyscall {
+            sysStat(path, buf)
+        }
+    }
+
+    #if !os(Windows)
+    @inline(never)
     internal static func readlink(
         path: UnsafePointer<Int8>,
         buf: UnsafeMutablePointer<Int8>,
@@ -125,14 +174,6 @@ internal enum Posix {
     ) throws -> Int {
         try wrapSyscall {
             sysReadlink(path, buf, bufSize)
-        }
-    }
-
-    @inline(never)
-    @discardableResult
-    internal static func stat(path: UnsafePointer<CChar>, buf: UnsafeMutablePointer<stat>) throws -> CInt {
-        try wrapSyscall {
-            sysStat(path, buf)
         }
     }
 
@@ -167,4 +208,27 @@ internal enum Posix {
         }
         #endif
     }
+    #else
+    // Windows has no mlock or munlock. VirtualLock and VirtualUnlock are the
+    // closest equivalents because they keep locked pages out of the pagefile.
+    // They report failure through GetLastError rather than errno, so
+    // wrapSyscall cannot preserve the error.
+    @inline(never)
+    @discardableResult
+    internal static func mlock(addr: UnsafeRawPointer, len: Int) throws -> CInt {
+        guard VirtualLock(UnsafeMutableRawPointer(mutating: addr), SIZE_T(len)) else {
+            throw IOError(errnoCode: ENOMEM, reason: "VirtualLock failed: GetLastError() = \(GetLastError())")
+        }
+        return 0
+    }
+
+    @inline(never)
+    @discardableResult
+    internal static func munlock(addr: UnsafeRawPointer, len: Int) throws -> CInt {
+        guard VirtualUnlock(UnsafeMutableRawPointer(mutating: addr), SIZE_T(len)) else {
+            throw IOError(errnoCode: ENOMEM, reason: "VirtualUnlock failed: GetLastError() = \(GetLastError())")
+        }
+        return 0
+    }
+    #endif
 }

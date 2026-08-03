@@ -25,6 +25,8 @@ import Glibc
 import Bionic
 #elseif canImport(WASILibc)
 import WASILibc
+#elseif os(Windows)
+import ucrt
 #else
 #error("unsupported os")
 #endif

@@ -93,11 +93,19 @@ let package = Package(
                 .define("_WINSOCKAPI_", .when(platforms: [.windows])),
                 .define("NOMINMAX", .when(platforms: [.windows])),
                 .define("NOCRYPT", .when(platforms: [.windows])),
+                // Silence the CRT's "consider using fopen_s" style deprecation warnings
+                // for the vendored sources.
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                // Windows assembly sources are not part of this package build,
+                // so the C implementation must remain self-contained.
+                .define("OPENSSL_NO_ASM", .when(platforms: [.windows])),
             ],
             cxxSettings: [
                 .define("_WINSOCKAPI_", .when(platforms: [.windows])),
                 .define("NOMINMAX", .when(platforms: [.windows])),
                 .define("NOCRYPT", .when(platforms: [.windows])),
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                .define("OPENSSL_NO_ASM", .when(platforms: [.windows])),
             ]
         ),
         .target(
