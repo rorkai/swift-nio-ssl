@@ -4954,6 +4954,7 @@
 #define lh_SSL_SESSION_call_doall_arg BORINGSSL_ADD_PREFIX(BORINGSSL_PREFIX, lh_SSL_SESSION_call_doall_arg)
 #define lh_SSL_SESSION_doall BORINGSSL_ADD_PREFIX(BORINGSSL_PREFIX, lh_SSL_SESSION_doall)
 #define lh_SSL_SESSION_doall_arg BORINGSSL_ADD_PREFIX(BORINGSSL_PREFIX, lh_SSL_SESSION_doall_arg)
+#define p_thread_callback_boringssl BORINGSSL_ADD_PREFIX(BORINGSSL_PREFIX, p_thread_callback_boringssl)
 #define ssl_credential_st BORINGSSL_ADD_PREFIX(BORINGSSL_PREFIX, ssl_credential_st)
 #define ssl_ctx_st BORINGSSL_ADD_PREFIX(BORINGSSL_PREFIX, ssl_ctx_st)
 #define ssl_ech_keys_st BORINGSSL_ADD_PREFIX(BORINGSSL_PREFIX, ssl_ech_keys_st)

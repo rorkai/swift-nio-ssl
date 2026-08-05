@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-@_implementationOnly import CNIOBoringSSL
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOEmbedded
@@ -20,7 +19,21 @@ import NIOPosix
 import NIOTLS
 import XCTest
 
+@_implementationOnly import CNIOBoringSSL
+
 @testable import NIOSSL
+
+#if os(Windows)
+import ucrt
+#endif
+
+// Each platform uses its native flag to keep test credentials out of child
+// processes.
+#if os(Windows)
+private let testCloseOnExecFlag = CInt(_O_NOINHERIT)
+#else
+private let testCloseOnExecFlag = O_CLOEXEC
+#endif
 
 public func assertNoThrowWithValue<T>(
     _ body: @autoclosure () throws -> T,
@@ -407,7 +420,7 @@ internal func serverTLSChannel(
 ) throws -> Channel {
     try assertNoThrowWithValue(
         ServerBootstrap(group: group)
-            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandlers(preHandlers())
@@ -669,7 +682,7 @@ class NIOSSLIntegrationTest: XCTestCase {
 
     static func keyInFile(key: NIOSSLPrivateKey, passphrase: String) throws -> String {
         let fileName = try makeTemporaryFile(fileExtension: ".pem")
-        let tempFile = open(fileName, O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0o644)
+        let tempFile = open(fileName, O_RDWR | O_CREAT | O_TRUNC | testCloseOnExecFlag, 0o644)
         precondition(tempFile > 1, String(cString: strerror(errno)))
         let fileBio = CNIOBoringSSL_BIO_new_fp(fdopen(tempFile, "w+"), BIO_CLOSE)
         precondition(fileBio != nil)
@@ -700,7 +713,7 @@ class NIOSSLIntegrationTest: XCTestCase {
             fatalError("couldn't make temp file")
         }
         let tempFile = fileName.withCString { ptr in
-            open(ptr, O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0o644)
+            open(ptr, O_RDWR | O_CREAT | O_TRUNC | testCloseOnExecFlag, 0o644)
         }
         precondition(tempFile > 1, String(cString: strerror(errno)))
         let fileBio = CNIOBoringSSL_BIO_new_fp(fdopen(tempFile, "w+"), BIO_CLOSE)
@@ -864,7 +877,7 @@ class NIOSSLIntegrationTest: XCTestCase {
 
         let serverChannel: Channel = try ServerBootstrap(group: group)
             .childChannelOption(ChannelOptions.allowRemoteHalfClosure, value: true)  // Important!
-            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandlers(
@@ -915,7 +928,7 @@ class NIOSSLIntegrationTest: XCTestCase {
 
         let serverChannel: Channel = try ServerBootstrap(group: group)
             .childChannelOption(ChannelOptions.allowRemoteHalfClosure, value: true)  // Important!
-            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandlers(
@@ -983,7 +996,7 @@ class NIOSSLIntegrationTest: XCTestCase {
 
         let serverChannel: Channel = try ServerBootstrap(group: group)
             .childChannelOption(ChannelOptions.allowRemoteHalfClosure, value: true)  // Important!
-            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandlers(
@@ -1033,7 +1046,7 @@ class NIOSSLIntegrationTest: XCTestCase {
 
         let serverChannel: Channel = try ServerBootstrap(group: group)
             .childChannelOption(ChannelOptions.allowRemoteHalfClosure, value: true)  // Important!
-            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandlers(

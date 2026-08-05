@@ -12,9 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+import NIOCore
+
 @_implementationOnly import CNIOBoringSSL
 @_implementationOnly import CNIOBoringSSLShims
-import NIOCore
 
 #if canImport(Darwin)
 import Darwin.C
@@ -26,6 +27,8 @@ import Glibc
 import Android
 #elseif canImport(WASILibc)
 import WASILibc
+#elseif os(Windows)
+import WinSDK
 #else
 #error("unsupported os")
 #endif
@@ -220,12 +223,12 @@ extension _SubjectAlternativeName.IPAddress: CustomStringConvertible {
         }
     }
 
-    static private func ipv4ToString(_ address: in_addr) -> String {
+    private static func ipv4ToString(_ address: in_addr) -> String {
 
         var address = address
         var dest: [CChar] = Array(repeating: 0, count: Self.ipv4AddressLength)
         dest.withUnsafeMutableBufferPointer { pointer in
-            let result = inet_ntop(AF_INET, &address, pointer.baseAddress!, socklen_t(pointer.count))
+            let result = inet_ntop(AF_INET, &address, pointer.baseAddress!, Self.bufferSize(pointer.count))
             precondition(
                 result != nil,
                 "The IP address was invalid. This should never happen as we're within the IP address struct."
@@ -234,11 +237,11 @@ extension _SubjectAlternativeName.IPAddress: CustomStringConvertible {
         return String(cString: &dest)
     }
 
-    static private func ipv6ToString(_ address: in6_addr) -> String {
+    private static func ipv6ToString(_ address: in6_addr) -> String {
         var address = address
         var dest: [CChar] = Array(repeating: 0, count: Self.ipv6AddressLength)
         dest.withUnsafeMutableBufferPointer { pointer in
-            let result = inet_ntop(AF_INET6, &address, pointer.baseAddress!, socklen_t(pointer.count))
+            let result = inet_ntop(AF_INET6, &address, pointer.baseAddress!, Self.bufferSize(pointer.count))
             precondition(
                 result != nil,
                 "The IP address was invalid. This should never happen as we're within the IP address struct."
@@ -246,4 +249,11 @@ extension _SubjectAlternativeName.IPAddress: CustomStringConvertible {
         }
         return String(cString: &dest)
     }
+
+    #if os(Windows)
+    // inet_ntop takes the buffer size as size_t on Windows and as socklen_t elsewhere.
+    private static func bufferSize(_ count: Int) -> Int { count }
+    #else
+    private static func bufferSize(_ count: Int) -> socklen_t { socklen_t(count) }
+    #endif
 }

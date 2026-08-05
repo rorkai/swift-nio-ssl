@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-@_implementationOnly import CNIOBoringSSL
 @preconcurrency import Dispatch
 import NIOConcurrencyHelpers
 import NIOCore
@@ -20,6 +19,8 @@ import NIOEmbedded
 import NIOPosix
 import NIOTLS
 import XCTest
+
+@_implementationOnly import CNIOBoringSSL
 
 @testable import NIOSSL
 
@@ -911,6 +912,7 @@ class TLSConfigurationTest: XCTestCase {
         XCTAssertNoThrow(try FileManager.default.removeItem(at: URL(string: "file://" + rootPath)!))
     }
 
+    #if !os(Windows)
     func testRehashFormatToPopulateCANamesFromDirectory() throws {
         // Use the test name as the directory name in the temporary directory.
         let testName = String("\(#function)".dropLast(2))
@@ -1032,6 +1034,85 @@ class TLSConfigurationTest: XCTestCase {
         let successSymlink = try NIOSSLContext._isRehashFormat(path: rehashSymlinkName)
         XCTAssertTrue(successSymlink)
     }
+    #endif
+
+    #if os(Windows)
+    func testWindowsRehashFormatToPopulateCANamesFromDirectory() throws {
+        let testName = String("\(#function)".dropLast(2))
+        let testDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(testName, isDirectory: true)
+        try? FileManager.default.removeItem(at: testDirectory)
+        defer {
+            try? FileManager.default.removeItem(at: testDirectory)
+        }
+
+        let rootCAPathOne = try dumpToFile(data: .init(customCARoot.utf8), fileExtension: ".pem", customPath: testName)
+        let rootCAPathTwo = try dumpToFile(
+            data: .init(secondaryRootCertificateForClientAuthentication.utf8),
+            fileExtension: ".pem",
+            customPath: testName
+        )
+        let rehashNameOne = getRehashFilename(path: rootCAPathOne, testName: testName, numericExtension: 0)
+        let rehashNameTwo = getRehashFilename(path: rootCAPathTwo, testName: testName, numericExtension: 0)
+        try FileManager.default.copyItem(atPath: rootCAPathOne, toPath: rehashNameOne)
+        try FileManager.default.copyItem(atPath: rootCAPathTwo, toPath: rehashNameTwo)
+
+        let digitalIdentities = try setupTLSLeafandClientIdentitiesFromCustomCARoot()
+        var serverConfig = TLSConfiguration.makeServerConfiguration(
+            certificateChain: [.certificate(digitalIdentities.leafCert)],
+            privateKey: .privateKey(digitalIdentities.leafKey)
+        )
+        serverConfig.sendCANameList = true
+        serverConfig.trustRoots = .file(testDirectory.path)
+        serverConfig.certificateVerification = .fullVerification
+
+        let serverContext = try NIOSSLContext(configuration: serverConfig)
+        XCTAssertEqual(
+            serverContext.getX509NameListCount(),
+            2,
+            "CA Name List should contain both configured roots."
+        )
+    }
+
+    func testWindowsRehashFormat() throws {
+        let testName = String("\(#function)".dropLast(2))
+        let testDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(testName, isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: testDirectory)
+        }
+
+        let dummyFile = try dumpToFile(data: Data(), fileExtension: ".txt", customPath: testName)
+        let regularRehashFile = testDirectory.appendingPathComponent("7f44456a.0")
+        try FileManager.default.moveItem(atPath: dummyFile, toPath: regularRehashFile.path)
+        XCTAssertTrue(try NIOSSLContext._isRehashFormat(path: regularRehashFile.path))
+
+        let rehashDirectory = testDirectory.appendingPathComponent("7f44456b.0", isDirectory: true)
+        try FileManager.default.createDirectory(at: rehashDirectory, withIntermediateDirectories: false)
+        XCTAssertFalse(try NIOSSLContext._isRehashFormat(path: rehashDirectory.path))
+    }
+
+    func testDirectoryContentsNormalizesWindowsPathSeparator() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer {
+            XCTAssertNoThrow(try FileManager.default.removeItem(at: directory))
+        }
+        let certificate = directory.appendingPathComponent("7f44456a.0")
+        try Data().write(to: certificate)
+
+        let entries = Array(DirectoryContents(path: directory.path))
+
+        XCTAssertTrue(
+            entries.contains { entry in
+                URL(fileURLWithPath: entry).lastPathComponent
+                    == certificate.lastPathComponent
+                    && FileManager.default.fileExists(atPath: entry)
+            }
+        )
+    }
+    #endif
 
     func testNonexistentFileObject() throws {
         var clientConfig = TLSConfiguration.makeClientConfiguration()
@@ -1084,7 +1165,7 @@ class TLSConfigurationTest: XCTestCase {
 
         // We now sleep a short time to let everything catch up and the runtime catch any exclusivity violation.
         // 10ms is fine.
-        usleep(10_000)
+        Thread.sleep(forTimeInterval: 0.01)
 
         // Great, signal the sempahore twice to un-wedge everything and wait for everything to exit.
         semaphore.signal()

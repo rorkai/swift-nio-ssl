@@ -12,8 +12,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-@_implementationOnly import CNIOBoringSSL
 import NIOCore
+
+@_implementationOnly import CNIOBoringSSL
 
 #if canImport(Darwin)
 import Darwin.C
@@ -25,6 +26,8 @@ import Glibc
 import Bionic
 #elseif canImport(WASILibc)
 import WASILibc
+#elseif os(Windows)
+import ucrt
 #else
 #error("unsupported os")
 #endif
