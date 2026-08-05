@@ -34,7 +34,7 @@ func generateDependencies() -> [Package.Dependency] {
         return [
             .package(
                 url: "https://github.com/rorkai/swift-nio.git",
-                exact: "2.100.0-rork.1"
+                revision: "b39197e96596a3a4425ea96d480d96552f3c6900"
             )
         ]
     } else {
@@ -93,11 +93,18 @@ let package = Package(
                 .define("_WINSOCKAPI_", .when(platforms: [.windows])),
                 .define("NOMINMAX", .when(platforms: [.windows])),
                 .define("NOCRYPT", .when(platforms: [.windows])),
+                // The vendored C sources use portable CRT calls even where
+                // Windows offers secure-suffix alternatives.
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                // Windows assembly sources are not part of this package build.
+                .define("OPENSSL_NO_ASM", .when(platforms: [.windows])),
             ],
             cxxSettings: [
                 .define("_WINSOCKAPI_", .when(platforms: [.windows])),
                 .define("NOMINMAX", .when(platforms: [.windows])),
                 .define("NOCRYPT", .when(platforms: [.windows])),
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                .define("OPENSSL_NO_ASM", .when(platforms: [.windows])),
             ]
         ),
         .target(

@@ -18,6 +18,10 @@ import XCTest
 
 @testable import NIOSSL
 
+#if os(Windows)
+import WinSDK
+#endif
+
 let multiSanCert = """
     -----BEGIN CERTIFICATE-----
     MIIDEzCCAfugAwIBAgIURiMaUmhI1Xr0mZ4p+JmI0XjZTaIwDQYJKoZIhvcNAQEL
@@ -164,22 +168,21 @@ let certWithOtherNameSAN = """
     """
 
 func makeTemporaryFile(fileExtension: String = "", customPath: String = "") throws -> String {
-    var template = "\(FileManager.default.temporaryDirectory.path)/niotestXXXXXXX\(fileExtension)"
-    // If a custom file path is passed in then a new directory has to also be created.  Then the file can be written to that directory.
+    var directory = FileManager.default.temporaryDirectory
     if !customPath.isEmpty {
-        let path = "\(FileManager.default.temporaryDirectory.path)/\(customPath)/"
-        try FileManager.default.createDirectory(at: URL(fileURLWithPath: path), withIntermediateDirectories: true)
-        template = "\(FileManager.default.temporaryDirectory.path)/\(customPath)/niotestXXXXXXX\(fileExtension)"
+        directory.appendPathComponent(customPath, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
     }
-    var templateBytes = template.utf8 + [0]
-    let fd = templateBytes.withUnsafeMutableBufferPointer { ptr in
-        ptr.baseAddress!.withMemoryRebound(to: Int8.self, capacity: ptr.count) { (ptr: UnsafeMutablePointer<Int8>) in
-            mkstemps(ptr, CInt(fileExtension.utf8.count))
-        }
+    let file = directory.appendingPathComponent(
+        "niotest-\(UUID().uuidString)\(fileExtension)"
+    )
+    guard FileManager.default.createFile(atPath: file.path, contents: Data()) else {
+        throw CocoaError(.fileWriteFileExists)
     }
-    close(fd)
-    templateBytes.removeLast()
-    return String(decoding: templateBytes, as: UTF8.self)
+    return file.path
 }
 
 internal func dumpToFile(data: Data, fileExtension: String = "", customPath: String = "") throws -> String {
