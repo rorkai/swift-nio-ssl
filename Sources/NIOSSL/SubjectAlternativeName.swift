@@ -12,9 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+import NIOCore
+
 @_implementationOnly import CNIOBoringSSL
 @_implementationOnly import CNIOBoringSSLShims
-import NIOCore
 
 #if canImport(Darwin)
 import Darwin.C
@@ -55,11 +56,26 @@ public struct _SubjectAlternativeNames {
                 fatalError("Unexpected null pointer when unwrapping SAN value")
             }
 
-            let contents = UnsafeBufferPointer(
-                start: CNIOBoringSSL_ASN1_STRING_get0_data(name.pointee.d.ia5),
-                count: Int(CNIOBoringSSL_ASN1_STRING_length(name.pointee.d.ia5))
+            let type = _SubjectAlternativeName.NameType(name.pointee.type)
+            let contents: UnsafeBufferPointer<UInt8>
+            switch type {
+            case .dnsName, .ipAddress, .uri, .email:
+
+                // These GeneralName variants store an ASN1 string in the union.
+                contents = UnsafeBufferPointer(
+                    start: CNIOBoringSSL_ASN1_STRING_get0_data(name.pointee.d.ia5),
+                    count: Int(CNIOBoringSSL_ASN1_STRING_length(name.pointee.d.ia5))
+                )
+            default:
+
+                // Other variants use different union members. Treating them as
+                // ASN1 strings could read unrelated memory.
+                contents = UnsafeBufferPointer(start: nil, count: 0)
+            }
+            return .init(
+                nameType: type,
+                contents: .init(collection: self, buffer: contents)
             )
-            return .init(nameType: .init(name.pointee.type), contents: .init(collection: self, buffer: contents))
         }
 
         deinit {
@@ -207,7 +223,7 @@ extension _SubjectAlternativeName.IPAddress: CustomStringConvertible {
         }
     }
 
-    static private func ipv4ToString(_ address: in_addr) -> String {
+    private static func ipv4ToString(_ address: in_addr) -> String {
 
         var address = address
         var dest: [CChar] = Array(repeating: 0, count: Self.ipv4AddressLength)
@@ -221,7 +237,7 @@ extension _SubjectAlternativeName.IPAddress: CustomStringConvertible {
         return String(cString: &dest)
     }
 
-    static private func ipv6ToString(_ address: in6_addr) -> String {
+    private static func ipv6ToString(_ address: in6_addr) -> String {
         var address = address
         var dest: [CChar] = Array(repeating: 0, count: Self.ipv6AddressLength)
         dest.withUnsafeMutableBufferPointer { pointer in
@@ -236,8 +252,8 @@ extension _SubjectAlternativeName.IPAddress: CustomStringConvertible {
 
     #if os(Windows)
     // inet_ntop takes the buffer size as size_t on Windows and as socklen_t elsewhere.
-    static private func bufferSize(_ count: Int) -> Int { count }
+    private static func bufferSize(_ count: Int) -> Int { count }
     #else
-    static private func bufferSize(_ count: Int) -> socklen_t { socklen_t(count) }
+    private static func bufferSize(_ count: Int) -> socklen_t { socklen_t(count) }
     #endif
 }

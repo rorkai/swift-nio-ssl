@@ -144,8 +144,10 @@ internal enum Posix {
     @inline(never)
     internal static func fopen(file: String, mode: String) throws -> FILEPointer {
         try file.withCString { fileCString in
-            try wrapErrorIsNullReturnCall(errorReason: "fopen(file: \"\(file)\", mode: \"\(mode)\")") {
-                sysFopen(fileCString, mode)
+            try mode.withCString { modeCString in
+                try wrapErrorIsNullReturnCall(errorReason: "fopen(file: \"\(file)\", mode: \"\(mode)\")") {
+                    sysFopen(fileCString, modeCString)
+                }
             }
         }
     }
@@ -213,11 +215,13 @@ internal enum Posix {
     // closest equivalents because they keep locked pages out of the pagefile.
     // They report failure through GetLastError rather than errno, so
     // wrapSyscall cannot preserve the error.
+    // VirtualLock can also fail with ERROR_WORKING_SET_QUOTA for large buffers.
+    // This wrapper does not modify the process-wide working-set limits.
     @inline(never)
     @discardableResult
     internal static func mlock(addr: UnsafeRawPointer, len: Int) throws -> CInt {
         guard VirtualLock(UnsafeMutableRawPointer(mutating: addr), SIZE_T(len)) else {
-            throw IOError(errnoCode: ENOMEM, reason: "VirtualLock failed: GetLastError() = \(GetLastError())")
+            throw IOError(windows: GetLastError(), reason: "VirtualLock")
         }
         return 0
     }
@@ -226,7 +230,7 @@ internal enum Posix {
     @discardableResult
     internal static func munlock(addr: UnsafeRawPointer, len: Int) throws -> CInt {
         guard VirtualUnlock(UnsafeMutableRawPointer(mutating: addr), SIZE_T(len)) else {
-            throw IOError(errnoCode: ENOMEM, reason: "VirtualUnlock failed: GetLastError() = \(GetLastError())")
+            throw IOError(windows: GetLastError(), reason: "VirtualUnlock")
         }
         return 0
     }

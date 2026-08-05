@@ -12,9 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+import NIOCore
+
 @_implementationOnly import CNIOBoringSSL
 @_implementationOnly import CNIOBoringSSLShims
-import NIOCore
 
 #if canImport(Darwin)
 import Darwin.C
@@ -57,11 +58,16 @@ private func resolveGroupIDs(for curves: [NIOTLSCurve]?) -> [UInt16] {
     curves?.map { $0.rawValue } ?? defaultGroups
 }
 
+/// Filesystem entry kinds relevant to trust-root loading.
 internal enum FileSystemObject {
+    /// A directory that may contain rehashed certificate files.
     case directory
+
+    /// A regular file that may contain certificate bytes.
     case file
 
-    static internal func pathType(path: String) -> FileSystemObject? {
+    /// Returns the filesystem kind at `path`, or `nil` when it cannot be read.
+    internal static func type(ofPath path: String) -> FileSystemObject? {
         var statObj = stat()
         do {
             try Posix.stat(path: path, buf: &statObj)
@@ -241,15 +247,17 @@ private func clientPSKCallback(
     let clientPSK = pskIdentity.key  // Key from the callback
     let clientIdentity = pskIdentity.identity
 
-    // Use max_identity_len so it does not trigger an overrun.
-    if clientIdentity.utf8.isEmpty || clientIdentity.utf8.count > max_identity_len {
+    // The buffer limit includes its null terminator, so copy the complete
+    // UTF-8 C string only when it fits.
+    let identityBytes = clientIdentity.utf8CString
+    if clientIdentity.utf8.isEmpty || identityBytes.count > Int(max_identity_len) {
         return 0
     }
 
     // Map the output identity from the one passed back from the callback.
     // This helps populate the server callback for the key exchange.
-    let _ = clientIdentity.withCString { ptr in
-        memcpy(unwrappedIdentity, ptr, clientIdentity.utf8.count)
+    identityBytes.withUnsafeBufferPointer { buffer in
+        _ = memcpy(unwrappedIdentity, buffer.baseAddress!, buffer.count)
     }
 
     if clientPSK.isEmpty || clientPSK.count > max_psk_len {
@@ -699,7 +707,7 @@ extension NIOSSLContext {
 
     private static func loadVerifyLocations(_ path: String, context: OpaquePointer, sendCANames: Bool) throws {
         let isDirectory: Bool
-        switch FileSystemObject.pathType(path: path) {
+        switch FileSystemObject.type(ofPath: path) {
         case .some(.directory):
             isDirectory = true
         case .some(.file):
@@ -746,10 +754,10 @@ extension NIOSSLContext {
     }
 
     private static func platformDefaultConfiguration(context: OpaquePointer) throws {
-        // Platform default trust is configured differently in different places.
-        // On Linux, we use our searched heuristics to guess about where the platform trust store is.
-        // On Darwin, we use a custom callback that is set later, in createConnection
-        #if os(Linux)
+        // Linux and FreeBSD use searched locations for their platform trust
+        // stores. Darwin installs its custom callback when creating a
+        // connection.
+        #if os(Linux) || os(FreeBSD)
         let result = rootCAFilePath.withCString { rootCAFilePointer in
             rootCADirectoryPath.withCString { rootCADirectoryPointer in
                 CNIOBoringSSL_SSL_CTX_load_verify_locations(context, rootCAFilePointer, rootCADirectoryPointer)
@@ -791,7 +799,9 @@ extension NIOSSLContext {
         // Check if the element’s name matches the c_rehash symlink name format.
         // The links created are of the form HHHHHHHH.D, where each H is a hexadecimal character and D is a single decimal digit.
         let utf8PathView = path.utf8
-        let utf8PathSplitView = utf8PathView.split(separator: UInt8(ascii: "/"))
+        let utf8PathSplitView = utf8PathView.split {
+            $0 == UInt8(ascii: "/") || $0 == UInt8(ascii: "\\")
+        }
 
         // Make sure the path is at least 10 units long
         guard let lastPathComponent = utf8PathSplitView.last,
@@ -814,7 +824,10 @@ extension NIOSSLContext {
         // Check if the element is a symlink. If it is not, return false.
         #if os(Windows)
         // Windows certificate directories use regular copies instead of
-        // symbolic links, so a matching rehash-style name is sufficient.
+        // symbolic links, so require a regular file with the rehash-style name.
+        guard FileSystemObject.type(ofPath: path) == .file else {
+            return false
+        }
         #else
         var buffer = stat()
         let _ = try Posix.lstat(path: path, buf: &buffer)
@@ -957,9 +970,12 @@ internal final class DirectoryContents: Sequence, IteratorProtocol {
     }
 }
 #else
+/// Iterates the immediate paths in a certificate directory.
 internal class DirectoryContents: Sequence, IteratorProtocol {
 
     typealias Element = String
+
+    /// Directory prefix used to construct each returned entry path.
     let path: String
     // Used to account between the differences of DIR being defined on Darwin.
     // Otherwise an OpaquePointer needs to be used to account for the non-defined type in glibc.
@@ -967,7 +983,7 @@ internal class DirectoryContents: Sequence, IteratorProtocol {
     // On Windows the search handle already holds the first entry when it is opened,
     // so the find data is read before each FindNextFileW call. A nil handle means
     // the directory is exhausted (or could not be opened at all).
-    private var dir: HANDLE?
+    private var searchHandle: HANDLE?
     private var findData = WIN32_FIND_DATAW()
     #elseif canImport(Darwin)
     let dir: UnsafeMutablePointer<DIR>
@@ -976,16 +992,14 @@ internal class DirectoryContents: Sequence, IteratorProtocol {
     #endif
 
     init(path: String) {
-        self.path = path
         #if os(Windows)
-        // The path prefixes each returned entry unchanged (see next()), so it is expected
-        // to end in a path separator, which makes this a search pattern for the
-        // directory's contents.
-        let handle = (path + "*").withCString(encodedAs: UTF16.self) {
+        self.path = path.hasSuffix("\\") || path.hasSuffix("/") ? path : path + "\\"
+        let handle = (self.path + "*").withCString(encodedAs: UTF16.self) {
             FindFirstFileW($0, &self.findData)
         }
-        self.dir = handle == INVALID_HANDLE_VALUE ? nil : handle
+        self.searchHandle = handle == INVALID_HANDLE_VALUE ? nil : handle
         #else
+        self.path = path.hasSuffix("/") ? path : path + "/"
         self.dir = opendir(path)!
         #endif
     }
@@ -1000,7 +1014,7 @@ internal class DirectoryContents: Sequence, IteratorProtocol {
     /// Returns the file name of the next directory entry, or nil once all entries were returned.
     private func nextEntryName() -> String? {
         #if os(Windows)
-        guard let dir = self.dir else {
+        guard let searchHandle = self.searchHandle else {
             return nil
         }
         let name = withUnsafePointer(to: self.findData.cFileName) { (ptr) -> String in
@@ -1009,9 +1023,9 @@ internal class DirectoryContents: Sequence, IteratorProtocol {
             let elementPointer = UnsafeRawPointer(ptr).assumingMemoryBound(to: WCHAR.self)
             return String(decodingCString: elementPointer, as: UTF16.self)
         }
-        if !FindNextFileW(dir, &self.findData) {
-            FindClose(dir)
-            self.dir = nil
+        if !FindNextFileW(searchHandle, &self.findData) {
+            FindClose(searchHandle)
+            self.searchHandle = nil
         }
         return name
         #else
@@ -1029,8 +1043,8 @@ internal class DirectoryContents: Sequence, IteratorProtocol {
 
     deinit {
         #if os(Windows)
-        if let dir = self.dir {
-            FindClose(dir)
+        if let searchHandle = self.searchHandle {
+            FindClose(searchHandle)
         }
         #else
         closedir(dir)

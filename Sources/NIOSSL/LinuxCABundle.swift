@@ -43,10 +43,10 @@ private let rootCADirectorySearchPaths = [
 
 private func locateRootCAFile() -> String? {
     // We need to find the root CA file. We have a list of search paths: let's use them.
-    rootCAFileSearchPaths.first(where: { FileSystemObject.pathType(path: $0) == .file })
+    rootCAFileSearchPaths.first(where: { FileSystemObject.type(ofPath: $0) == .file })
 }
 
 private func locateRootCADirectory() -> String? {
-    rootCADirectorySearchPaths.first(where: { FileSystemObject.pathType(path: $0) == .directory })
+    rootCADirectorySearchPaths.first(where: { FileSystemObject.type(ofPath: $0) == .directory })
 }
 #endif

@@ -12,10 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-@_implementationOnly import CNIOBoringSSL
 import Foundation
 import NIOCore
 import NIOEmbedded
+
+@_implementationOnly import CNIOBoringSSL
 
 @testable import NIOSSL
 
@@ -538,27 +539,12 @@ func pemToDer(_ pem: String) -> Data {
     return Data(base64Encoded: encodedData)!
 }
 
-// This function generates a random number suitable for use in an X509
-// serial field. This needs to be a positive number less than 2^159
-// (such that it will fit into 20 ASN.1 bytes).
-// This also needs to be portable across operating systems, and the easiest
-// way to do that is to use either getentropy() or read from urandom. Sadly
-// we need to support old Linuxes which may not possess getentropy as a syscall
-// (and definitely don't support it in glibc), so we need to read from urandom.
-// In the future we should just use getentropy and be happy.
+// X.509 serial values must be positive and fit within 159 bits.
 func randomSerialNumber() -> ASN1_INTEGER {
-    let bytesToRead = 20
-    let fd = open("/dev/urandom", O_RDONLY)
-    precondition(fd != -1)
-    defer {
-        close(fd)
+    var generator = SystemRandomNumberGenerator()
+    let randomBytes = (0..<20).map { _ in
+        UInt8.random(in: .min ... .max, using: &generator)
     }
-
-    var readBytes = Array.init(repeating: UInt8(0), count: bytesToRead)
-    let readCount = readBytes.withUnsafeMutableBytes {
-        read(fd, $0.baseAddress, bytesToRead)
-    }
-    precondition(readCount == bytesToRead)
 
     // Our 20-byte number needs to be converted into an integer. This is
     // too big for Swift's numbers, but BoringSSL can handle it fine.
@@ -567,7 +553,7 @@ func randomSerialNumber() -> ASN1_INTEGER {
         CNIOBoringSSL_BN_free(bn)
     }
 
-    _ = readBytes.withUnsafeBufferPointer {
+    _ = randomBytes.withUnsafeBufferPointer {
         CNIOBoringSSL_BN_bin2bn($0.baseAddress, $0.count, bn)
     }
 

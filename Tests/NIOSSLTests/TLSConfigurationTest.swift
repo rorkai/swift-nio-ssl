@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-@_implementationOnly import CNIOBoringSSL
 @preconcurrency import Dispatch
 import NIOConcurrencyHelpers
 import NIOCore
@@ -20,6 +19,8 @@ import NIOEmbedded
 import NIOPosix
 import NIOTLS
 import XCTest
+
+@_implementationOnly import CNIOBoringSSL
 
 @testable import NIOSSL
 
@@ -912,9 +913,14 @@ class TLSConfigurationTest: XCTestCase {
     }
 
     func testRehashFormatToPopulateCANamesFromDirectory() throws {
-        // Use the test name as the directory name in the temporary directory.
         let testName = String("\(#function)".dropLast(2))
-        // Create 2 PEM based certs
+        let testDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(testName, isDirectory: true)
+        try? FileManager.default.removeItem(at: testDirectory)
+        defer {
+            try? FileManager.default.removeItem(at: testDirectory)
+        }
+
         let rootCAPathOne = try dumpToFile(data: .init(customCARoot.utf8), fileExtension: ".pem", customPath: testName)
         let rootCAPathTwo = try dumpToFile(
             data: .init(secondaryRootCertificateForClientAuthentication.utf8),
@@ -922,116 +928,109 @@ class TLSConfigurationTest: XCTestCase {
             customPath: testName
         )
 
-        // Create a rehash formatted name of both certificate's subject name that was created above.
-        // Take these rehash certificate names and format a symlink with them below with createSymbolicLink.
         let rehashSymlinkNameOne = getRehashFilename(path: rootCAPathOne, testName: testName, numericExtension: 0)
         let rehashSymlinkNameTwo = getRehashFilename(path: rootCAPathTwo, testName: testName, numericExtension: 0)
-        // Extract just the filename of the newly create certs in the tmp directory.
-        let rootCAURLOne = URL(string: "file://" + rootCAPathOne)!
-        let rootCAURLTwo = URL(string: "file://" + rootCAPathTwo)!
-        let rootCAFilenameOne = rootCAURLOne.lastPathComponent
-        let rootCAFilenameTwo = rootCAURLTwo.lastPathComponent
 
-        // Create an in-directory symlink the same way that c_rehash would do this.
-        // For example: 7f44456a.0 -> niotestIEOFcMI.pem
-        // NOT: 7f44456a.0 -> /var/folders/my/path/niotestIEOFcMI.pem
-        XCTAssertNoThrow(
-            try FileManager.default.createSymbolicLink(
-                atPath: rehashSymlinkNameOne,
-                withDestinationPath: rootCAFilenameOne
-            )
+        #if os(Windows)
+        try FileManager.default.copyItem(
+            atPath: rootCAPathOne,
+            toPath: rehashSymlinkNameOne
         )
-        XCTAssertNoThrow(
-            try FileManager.default.createSymbolicLink(
-                atPath: rehashSymlinkNameTwo,
-                withDestinationPath: rootCAFilenameTwo
-            )
+        try FileManager.default.copyItem(
+            atPath: rootCAPathTwo,
+            toPath: rehashSymlinkNameTwo
         )
+        #else
+        let rootCAFilenameOne = URL(fileURLWithPath: rootCAPathOne).lastPathComponent
+        let rootCAFilenameTwo = URL(fileURLWithPath: rootCAPathTwo).lastPathComponent
+        try FileManager.default.createSymbolicLink(
+            atPath: rehashSymlinkNameOne,
+            withDestinationPath: rootCAFilenameOne
+        )
+        try FileManager.default.createSymbolicLink(
+            atPath: rehashSymlinkNameTwo,
+            withDestinationPath: rootCAFilenameTwo
+        )
+        #endif
 
-        defer {
-            // Delete all files that were created for this test.
-            XCTAssertNoThrow(try FileManager.default.removeItem(at: rootCAURLOne))
-            XCTAssertNoThrow(try FileManager.default.removeItem(at: rootCAURLTwo))
-            XCTAssertNoThrow(try FileManager.default.removeItem(at: URL(string: "file://" + rehashSymlinkNameOne)!))
-            XCTAssertNoThrow(try FileManager.default.removeItem(at: URL(string: "file://" + rehashSymlinkNameTwo)!))
-            // Remove the actual directory also.
-            let removePath = "\(FileManager.default.temporaryDirectory.path)/\(testName)/"
-            XCTAssertNoThrow(try FileManager.default.removeItem(at: URL(string: "file://" + removePath)!))
-        }
-
-        let tempFileDir = FileManager.default.temporaryDirectory.path + "/\(testName)/"
         let digitalIdentities = try setupTLSLeafandClientIdentitiesFromCustomCARoot()
-
-        // Server Configuration
         var serverConfig = TLSConfiguration.makeServerConfiguration(
             certificateChain: [.certificate(digitalIdentities.leafCert)],
             privateKey: .privateKey(digitalIdentities.leafKey)
         )
         serverConfig.sendCANameList = true
-        serverConfig.trustRoots = .file(tempFileDir)  // Directory path.
+        serverConfig.trustRoots = .file(testDirectory.path)
         serverConfig.certificateVerification = .fullVerification
 
-        var serverContext: NIOSSLContext!
-        XCTAssertNoThrow(serverContext = try NIOSSLContext(configuration: serverConfig))
-        // Only setup the serverContext here to define that our two certificate CA names were populated to the SSL_CTX.
-        let countAfter = serverContext.getX509NameListCount()
-        XCTAssertEqual(countAfter, 2, "CA Name List should be 2 after the Server Context is created")
+        let serverContext = try NIOSSLContext(configuration: serverConfig)
+        XCTAssertEqual(
+            serverContext.getX509NameListCount(),
+            2,
+            "CA Name List should contain both configured roots."
+        )
     }
 
     func testRehashFormat() throws {
-        // Use the test name as the directory name in the temporary directory.
         let testName = String("\(#function)".dropLast(2))
-        // This test case creates path variables and files to run through the `isRehashFormat` function in `NIOSSLContext`.
-        // Note that the c_rehash file format is a symlink to an original PEM or CER file in the form of HHHHHHHH.D.
-        // Note that CRLs are not supported, only PEM and DER representations of certificates.
-
-        // Not a valid path.
-        let badPath = try NIOSSLContext._isRehashFormat(path: "")
-        XCTAssertFalse(badPath)
-        // Filename is not in rehash format.
-        let acceptablePathBadFilename = try NIOSSLContext._isRehashFormat(path: "/etc/ssl/certs/myFile.pem")
-        XCTAssertFalse(acceptablePathBadFilename)
-        // Filename is in bad rehash format.
-        let acceptablePathBadRehashFormat = try NIOSSLContext._isRehashFormat(path: "/etc/ssl/certs/7f44456a.z")
-        XCTAssertFalse(acceptablePathBadRehashFormat)
-
-        // Test with an actual file, but no symlink.
-        let dummyFile = try dumpToFile(data: Data(), fileExtension: ".txt", customPath: testName)
-        let newPath = FileManager.default.temporaryDirectory.path + "/\(testName)/7f44456a.1"
-        let _ = try FileManager.default.moveItem(atPath: dummyFile, toPath: newPath)
-        // Filename is in rehash format, but not a symlink.
-        let acceptablePathAndRehashFormatButNoSymlink = try NIOSSLContext._isRehashFormat(path: newPath)
-        XCTAssertFalse(acceptablePathAndRehashFormatButNoSymlink)
-
-        // Test actual symlink
-        let rootCAPathOne = try dumpToFile(data: .init(customCARoot.utf8), fileExtension: ".pem", customPath: testName)
-        let rehashSymlinkName = getRehashFilename(path: rootCAPathOne, testName: testName, numericExtension: 0)
-
-        // Extract just the filename of the newly create certs in the tmp directory.
-        let rootCAURLOne = URL(string: "file://" + rootCAPathOne)!
-        let rootCAFilenameOne = rootCAURLOne.lastPathComponent
-
-        XCTAssertNoThrow(
-            try FileManager.default.createSymbolicLink(
-                atPath: rehashSymlinkName,
-                withDestinationPath: rootCAFilenameOne
-            )
-        )
-
+        let testDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(testName, isDirectory: true)
         defer {
-            // Delete all files that were created for this test.
-            XCTAssertNoThrow(try FileManager.default.removeItem(at: URL(string: "file://" + rootCAPathOne)!))
-            XCTAssertNoThrow(try FileManager.default.removeItem(at: URL(string: "file://" + rehashSymlinkName)!))
-            XCTAssertNoThrow(try FileManager.default.removeItem(at: URL(string: "file://" + newPath)!))
-            // Remove the actual directory also.
-            let removePath = "\(FileManager.default.temporaryDirectory.path)/\(testName)/"
-            XCTAssertNoThrow(try FileManager.default.removeItem(at: URL(string: "file://" + removePath)!))
+            XCTAssertNoThrow(try FileManager.default.removeItem(at: testDirectory))
         }
 
-        // Test the success case for the symlink
-        let successSymlink = try NIOSSLContext._isRehashFormat(path: rehashSymlinkName)
-        XCTAssertTrue(successSymlink)
+        XCTAssertFalse(try NIOSSLContext._isRehashFormat(path: ""))
+        XCTAssertFalse(try NIOSSLContext._isRehashFormat(path: "/etc/ssl/certs/myFile.pem"))
+        XCTAssertFalse(try NIOSSLContext._isRehashFormat(path: "/etc/ssl/certs/7f44456a.z"))
+
+        let dummyFile = try dumpToFile(data: Data(), fileExtension: ".txt", customPath: testName)
+        #if os(Windows)
+        let regularRehashFile = testDirectory.appendingPathComponent("7f44456a.0")
+        #else
+        let regularRehashFile = testDirectory.appendingPathComponent("7f44456a.1")
+        #endif
+        try FileManager.default.moveItem(atPath: dummyFile, toPath: regularRehashFile.path)
+
+        #if os(Windows)
+        XCTAssertTrue(try NIOSSLContext._isRehashFormat(path: regularRehashFile.path))
+
+        let rehashDirectory = testDirectory.appendingPathComponent("7f44456b.0", isDirectory: true)
+        try FileManager.default.createDirectory(at: rehashDirectory, withIntermediateDirectories: false)
+        XCTAssertFalse(try NIOSSLContext._isRehashFormat(path: rehashDirectory.path))
+        #else
+        XCTAssertFalse(try NIOSSLContext._isRehashFormat(path: regularRehashFile.path))
+
+        let rootCAPathOne = try dumpToFile(data: .init(customCARoot.utf8), fileExtension: ".pem", customPath: testName)
+        let rehashSymlink = testDirectory.appendingPathComponent("7f44456a.0")
+        try FileManager.default.createSymbolicLink(
+            atPath: rehashSymlink.path,
+            withDestinationPath: URL(fileURLWithPath: rootCAPathOne).lastPathComponent
+        )
+        XCTAssertTrue(try NIOSSLContext._isRehashFormat(path: rehashSymlink.path))
+        #endif
     }
+
+    #if os(Windows)
+    func testDirectoryContentsNormalizesWindowsPathSeparator() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer {
+            XCTAssertNoThrow(try FileManager.default.removeItem(at: directory))
+        }
+        let certificate = directory.appendingPathComponent("7f44456a.0")
+        try Data().write(to: certificate)
+
+        let entries = Array(DirectoryContents(path: directory.path))
+
+        XCTAssertTrue(
+            entries.contains { entry in
+                URL(fileURLWithPath: entry).lastPathComponent
+                    == certificate.lastPathComponent
+                    && FileManager.default.fileExists(atPath: entry)
+            }
+        )
+    }
+    #endif
 
     func testNonexistentFileObject() throws {
         var clientConfig = TLSConfiguration.makeClientConfiguration()
@@ -1084,7 +1083,7 @@ class TLSConfigurationTest: XCTestCase {
 
         // We now sleep a short time to let everything catch up and the runtime catch any exclusivity violation.
         // 10ms is fine.
-        usleep(10_000)
+        Thread.sleep(forTimeInterval: 0.01)
 
         // Great, signal the sempahore twice to un-wedge everything and wait for everything to exit.
         semaphore.signal()

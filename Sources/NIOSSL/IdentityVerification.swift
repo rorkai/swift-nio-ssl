@@ -320,6 +320,12 @@ private struct AnalysedCertificateHostname {
             let (wildcardLabel, remainingComponents) = baseName.splitAroundIndex(firstPeriodIndex)
             let (targetFirstLabel, targetRemainingComponents) = target.splitAroundIndex(firstPeriodIndexForName)
 
+            // IDNA A-labels require exact matching and cannot be expanded by a
+            // certificate wildcard.
+            guard !targetFirstLabel.prefix(4).caseInsensitiveElementsEqual(asciiIDNAIdentifier) else {
+                return false
+            }
+
             guard remainingComponents.caseInsensitiveElementsEqual(targetRemainingComponents) else {
                 // Wildcard is irrelevant, the remaining components don't match.
                 return false
